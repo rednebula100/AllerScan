@@ -36,7 +36,10 @@ NEIS(교육정보 개방 포털) API로 급식 데이터를 가져와 내 알레
 
 ### Windows — 실행 파일로 바로 쓰기 (Python 설치 불필요)
 
-1. [GitHub Releases](https://github.com/rednebula100/AllerScan/releases)에서 최신 `AllerScan.exe`를 다운로드합니다.
+**[⬇ AllerScan.exe 다운로드 (v1.1.0)](https://github.com/rednebula100/AllerScan/releases/download/v1.1.0/AllerScan.exe)**
+— 약 380MB (딥러닝 예측 모듈 AllerPredict + TensorFlow 포함). 다른 버전은 [Releases 전체 목록](https://github.com/rednebula100/AllerScan/releases)에서 확인하세요.
+
+1. 위 링크로 `AllerScan.exe`를 다운로드합니다.
 2. `AllerScan.exe`를 실행합니다 — API 키가 없으면 앱이 **최초 실행 시 자동으로 키 입력 화면**을
    보여줍니다. 나중에 키를 바꾸고 싶으면 상단바의 **⚙ 버튼**을 언제든 누르면 됩니다.
    (환경변수로 설정하고 싶다면 아래 [환경변수 설정](#환경변수-설정) 참고)
