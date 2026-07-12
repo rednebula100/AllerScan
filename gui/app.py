@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import tkinter as tk
 from collections import Counter
 from datetime import datetime, timedelta
@@ -12,6 +13,7 @@ from typing import NamedTuple
 
 import customtkinter as ctk
 import matplotlib
+import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from PIL import Image, ImageDraw, ImageFont
@@ -51,8 +53,11 @@ FONT = "Malgun Gothic"
 WEEKDAY_NAMES = ["월", "화", "수", "목", "금"]
 MEAL_TAB = "🍽 식사 기록"
 SYMPTOM_TAB = "⚡ 증상 기록"
+FOOD_SCAN_TAB = "📷 식품 스캔"
 ANALYSIS_TAB = "📊 분석"
-TAB_ORDER = WEEKDAY_NAMES + [MEAL_TAB, SYMPTOM_TAB, ANALYSIS_TAB]
+TAB_ORDER = WEEKDAY_NAMES + [MEAL_TAB, SYMPTOM_TAB, FOOD_SCAN_TAB, ANALYSIS_TAB]
+SCAN_FPS = 15
+SCAN_CLASSIFY_EVERY_N_FRAMES = SCAN_FPS  # 약 1초에 한 번만 분류(추론 비용 절약), 미리보기는 매 프레임
 
 DATA_DIR = "data"
 PRESET_DIR = os.path.join(DATA_DIR, "presets")
@@ -147,6 +152,12 @@ class MealApp(ctk.CTk):
         self._corr_canvas: FigureCanvasTkAgg | None = None
         self._exposure_canvas: FigureCanvasTkAgg | None = None
         self._quitting = False
+
+        # 식품 스캔(physical_ai) 상태
+        self._food_classifier = None  # FoodClassifier, 최초 스캔 시 지연 생성
+        self._scan_active = False
+        self._scan_stop_event: threading.Event | None = None
+        self._scan_thread: threading.Thread | None = None
 
         # 식사/증상 기록 상태
         self._meal_foods: list[dict] = []
@@ -278,7 +289,10 @@ class MealApp(ctk.CTk):
         self._content_area = ctk.CTkFrame(center, fg_color=BG, corner_radius=0)
         self._content_area.pack(fill="both", expand=True)
 
-        widths = {**{w: 46 for w in WEEKDAY_NAMES}, MEAL_TAB: 118, SYMPTOM_TAB: 118, ANALYSIS_TAB: 92}
+        widths = {
+            **{w: 46 for w in WEEKDAY_NAMES},
+            MEAL_TAB: 118, SYMPTOM_TAB: 118, FOOD_SCAN_TAB: 118, ANALYSIS_TAB: 92,
+        }
         for name in TAB_ORDER:
             btn = ctk.CTkButton(
                 self._tabbar, text=name, width=widths[name], height=34, corner_radius=17,
@@ -296,6 +310,7 @@ class MealApp(ctk.CTk):
 
         self._build_meal_tab(self._tab_content[MEAL_TAB])
         self._build_symptom_tab(self._tab_content[SYMPTOM_TAB])
+        self._build_food_scan_tab(self._tab_content[FOOD_SCAN_TAB])
         self._build_analysis_tab(self._tab_content[ANALYSIS_TAB])
 
     def _build_left_panel(self, parent: ctk.CTkFrame) -> None:
@@ -355,6 +370,9 @@ class MealApp(ctk.CTk):
     # 커스텀 탭 전환
     # ------------------------------------------------------------------ #
     def _select_tab(self, name: str) -> None:
+        if self._active_tab == FOOD_SCAN_TAB and name != FOOD_SCAN_TAB and self._scan_active:
+            self._stop_food_scan()  # 탭을 벗어나면 웹캠 자원을 놓아준다
+
         for frame in self._tab_content.values():
             frame.pack_forget()
         self._tab_content[name].pack(fill="both", expand=True)
@@ -1447,6 +1465,212 @@ class MealApp(ctk.CTk):
         messagebox.showinfo("증상 기록", f"증상 {len(record.symptoms)}건을 저장했습니다.\n{path}")
 
     # ================================================================== #
+    # 식품 스캔 탭 (physical_ai)
+    # ================================================================== #
+    def _build_food_scan_tab(self, parent: ctk.CTkScrollableFrame) -> None:
+        ctk.CTkLabel(parent, text="📷 식품 스캔", font=self.f_title, text_color=ACCENT).pack(
+            anchor="w", padx=8, pady=(6, 2)
+        )
+        ctk.CTkLabel(
+            parent, text="웹캠으로 음식을 비추면 실시간으로 알레르기 유발 성분을 추정합니다.",
+            text_color=MUTED, font=self.f_body,
+        ).pack(anchor="w", padx=8, pady=(0, 10))
+
+        self._scan_video_label = ctk.CTkLabel(
+            parent, text="웹캠이 꺼져 있습니다.\n'스캔 시작'을 눌러주세요.",
+            width=480, height=360, fg_color=PANEL, corner_radius=12,
+            font=self.f_body, text_color=MUTED,
+        )
+        self._scan_video_label.pack(padx=8, pady=(0, 10))
+
+        self._scan_toggle_btn = ctk.CTkButton(
+            parent, text="▶ 스캔 시작", width=140, corner_radius=8, font=self.f_body_bold,
+            fg_color=ACCENT, text_color=BG, hover_color=ACCENT_HOVER, command=self._toggle_food_scan,
+        )
+        self._scan_toggle_btn.pack(anchor="w", padx=8, pady=(0, 10))
+
+        self._divider(parent)
+        ctk.CTkLabel(
+            parent, text="분류 결과", font=self.f_body_bold, text_color=CARD_TEXT_LIGHT,
+        ).pack(anchor="w", padx=8, pady=(4, 4))
+        self._scan_result_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        self._scan_result_frame.pack(fill="x", padx=8, pady=(0, 12))
+        ctk.CTkLabel(
+            self._scan_result_frame, text="스캔을 시작하면 약 1초마다 결과가 갱신됩니다.",
+            text_color=MUTED, font=self.f_body,
+        ).pack(anchor="w", padx=4, pady=6)
+
+    def _toggle_food_scan(self) -> None:
+        if self._scan_active:
+            self._stop_food_scan()
+        else:
+            self._start_food_scan()
+
+    def _start_food_scan(self) -> None:
+        try:
+            import cv2
+        except ImportError:
+            messagebox.showerror(
+                "식품 스캔",
+                "opencv-python이 설치되어 있지 않습니다.\n'pip install opencv-python'을 실행하세요.",
+            )
+            return
+
+        # 카메라가 있는지만 빠르게 확인하고 일단 닫는다 (아래서 모델 워밍업 뒤에 다시 연다).
+        probe = cv2.VideoCapture(0)
+        has_camera = probe.isOpened()
+        probe.release()
+        if not has_camera:
+            messagebox.showwarning("식품 스캔", "웹캠을 찾을 수 없습니다. 연결 상태를 확인해주세요.")
+            return
+
+        if self._food_classifier is None:
+            from physical_ai import FoodClassifier
+
+            self._food_classifier = FoodClassifier()
+        if not self._food_classifier.available:
+            messagebox.showerror(
+                "식품 스캔",
+                "분류 모델을 찾을 수 없습니다.\nphysical_ai/keras_model.h5, physical_ai/labels.txt를 확인하세요.",
+            )
+            return
+
+        self._scan_active = True
+        self._scan_stop_event = threading.Event()
+        self._scan_toggle_btn.configure(text="■ 스캔 중지", fg_color=DANGER, hover_color="#c42d3a")
+        stop_event = self._scan_stop_event
+        classifier = self._food_classifier
+        needs_warmup = not classifier.is_loaded
+
+        # 모델 최초 로딩은 수 초 걸린다(이후 호출은 0.1초 내외). 실측 결과 웹캠 캡처가
+        # 동시에 돌고 있으면 CPU 경합으로 로딩 시간이 2배 이상 느려져서(8초→16초),
+        # 카메라를 열기 전에 먼저 워밍업을 끝낸다. 그동안 멈춘 것처럼 보이지 않도록
+        # 안내도 같이 띄운다.
+        if needs_warmup:
+            for w in self._scan_result_frame.winfo_children():
+                w.destroy()
+            ctk.CTkLabel(
+                self._scan_result_frame, text="🧠 분류 모델을 불러오는 중입니다 (최초 1회, 최대 15초 정도 걸릴 수 있어요)...",
+                text_color=ACCENT, font=self.f_body,
+            ).pack(anchor="w", padx=4, pady=6)
+
+        def worker() -> None:
+            if needs_warmup and not stop_event.is_set():
+                try:
+                    classifier.classify_image(np.zeros((224, 224, 3), dtype=np.uint8))
+                except Exception:  # noqa: BLE001 - 워밍업 실패해도 실제 분류에서 다시 시도됨
+                    pass
+
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                cap.release()
+                self.after(0, self._on_scan_camera_lost)
+                return
+
+            frame_interval = 1.0 / SCAN_FPS
+            frame_count = 0
+            try:
+                while not stop_event.is_set():
+                    loop_start = time.time()
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
+                    rgb = frame[:, :, ::-1]  # BGR -> RGB
+                    preview = Image.fromarray(rgb)
+                    preview.thumbnail((480, 360))
+                    photo = ctk.CTkImage(light_image=preview, dark_image=preview, size=preview.size)
+
+                    frame_count += 1
+                    result = None
+                    if frame_count % SCAN_CLASSIFY_EVERY_N_FRAMES == 0:
+                        try:
+                            result = classifier.classify_image(rgb)
+                        except Exception:  # noqa: BLE001 - 스캔 루프가 죽으면 안 됨
+                            result = None
+
+                    self.after(0, lambda p=photo, r=result: self._update_scan_ui(p, r))
+                    elapsed = time.time() - loop_start
+                    stop_event.wait(max(0.0, frame_interval - elapsed))
+            finally:
+                cap.release()
+
+        self._scan_thread = threading.Thread(target=worker, daemon=True)
+        self._scan_thread.start()
+
+    def _on_scan_camera_lost(self) -> None:
+        """워밍업 도중/직후 카메라를 다시 열지 못한 경우(연결 해제 등)의 정리."""
+        self._stop_food_scan()
+        messagebox.showwarning("식품 스캔", "웹캠 연결이 끊겼습니다. 다시 시도해주세요.")
+
+    def _stop_food_scan(self) -> None:
+        self._scan_active = False
+        if self._scan_stop_event is not None:
+            self._scan_stop_event.set()
+        self._scan_thread = None
+        if hasattr(self, "_scan_toggle_btn"):
+            self._scan_toggle_btn.configure(text="▶ 스캔 시작", fg_color=ACCENT, hover_color=ACCENT_HOVER)
+        if hasattr(self, "_scan_video_label"):
+            self._scan_video_label.configure(image=None, text="웹캠이 꺼져 있습니다.\n'스캔 시작'을 눌러주세요.")
+
+    def _update_scan_ui(self, photo: "ctk.CTkImage", result: dict | None) -> None:
+        if not self._scan_active:
+            return  # 중지된 뒤 도착한 지연 프레임은 무시
+        self._scan_video_label.configure(image=photo, text="")
+        if result is not None:
+            self._render_scan_result(result)
+
+    def _render_scan_result(self, result: dict) -> None:
+        for w in self._scan_result_frame.winfo_children():
+            w.destroy()
+
+        class_name = result["class_name"]
+        confidence = result["confidence"]
+        allergens: set[int] | None = result["allergens"]
+        risk_level = result["risk_level"]
+        level_color = {"안전": SAFE, "주의": CAUTION, "판단불가": MUTED}.get(risk_level, MUTED)
+
+        ctk.CTkLabel(
+            self._scan_result_frame, text=f"{class_name}  ·  신뢰도 {confidence * 100:.0f}%",
+            font=self.f_title, text_color=CARD_TEXT_LIGHT,
+        ).pack(anchor="w", padx=4, pady=(4, 2))
+        ctk.CTkLabel(
+            self._scan_result_frame, text=risk_level, font=self.f_body_bold, text_color=level_color,
+        ).pack(anchor="w", padx=4, pady=(0, 6))
+
+        if allergens is None:
+            ctk.CTkLabel(
+                self._scan_result_frame, text="신뢰도가 낮아 알레르기 성분을 판단할 수 없습니다.",
+                text_color=MUTED, font=self.f_body,
+            ).pack(anchor="w", padx=4, pady=(0, 4))
+            return
+
+        if allergens:
+            names = ", ".join(ALLERGEN_NAMES[n] for n in sorted(allergens))
+            ctk.CTkLabel(
+                self._scan_result_frame, text=f"포함 성분: {names}",
+                font=self.f_body, text_color=CARD_TEXT_LIGHT,
+            ).pack(anchor="w", padx=4, pady=(0, 4))
+        else:
+            ctk.CTkLabel(
+                self._scan_result_frame, text="알레르기 유발 성분이 없는 식품입니다.",
+                text_color=SAFE, font=self.f_body,
+            ).pack(anchor="w", padx=4, pady=(0, 4))
+
+        if self.profile.allergies:
+            status = self.profile.is_safe(allergens)
+            status_map = {"safe": ("안전", SAFE), "caution": ("주의", CAUTION), "danger": ("위험", DANGER)}
+            label, color = status_map[status]
+            ctk.CTkLabel(
+                self._scan_result_frame, text=f"내 알레르기 기준: {label}",
+                font=self.f_body_bold, text_color=color,
+            ).pack(anchor="w", padx=4, pady=(4, 4))
+        else:
+            ctk.CTkLabel(
+                self._scan_result_frame, text="왼쪽에서 내 알레르기를 선택하면 개인화된 위험도가 표시됩니다.",
+                text_color=MUTED, font=self.f_small,
+            ).pack(anchor="w", padx=4, pady=(4, 4))
+
+    # ================================================================== #
     # 트레이 / 스케줄러 / 알림
     # ================================================================== #
     def _show_window(self) -> None:
@@ -1562,6 +1786,8 @@ class MealApp(ctk.CTk):
         if self._quitting:
             return
         self._quitting = True
+        if self._scan_active:
+            self._stop_food_scan()
         self.scheduler.stop()
         self.tray.stop()
         self.destroy()

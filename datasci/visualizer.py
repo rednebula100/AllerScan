@@ -128,12 +128,28 @@ def plot_trend_top5(weekly: pd.DataFrame, top5: list[str], path: str) -> str:
     return path
 
 
+HIGH_EXPOSURE_THRESHOLD = 0.95  # 이 이상은 "거의 매일 등장"으로 보고 그래프에서 제외
+
+
 def plot_next_week_prediction(prediction: dict, path: str) -> str:
-    """5. 다음 주 알레르겐별 노출 확률 예측 막대."""
-    items = list(prediction.get("predictions", {}).items())[:10]
+    """5. 다음 주 알레르겐별 노출 확률 예측 막대.
+
+    출현율이 95% 이상인 알레르겐(사실상 매일 등장해 예측할 의미가 적음)은 제외하고,
+    변동이 있는(=95% 미만) 알레르겐만 보여준다. 남는 항목이 없으면 "매일 고르게
+    등장한다"는 안내 문구를 대신 표시한다.
+    """
+    all_items = list(prediction.get("predictions", {}).items())
+    items = [(name, p) for name, p in all_items if p < HIGH_EXPOSURE_THRESHOLD][:10]
+    wk = prediction.get("next_week_index", "?")
     fig, ax = _new_fig((8, 6))
-    if not items:
+    ax.set_title(f"다음 주({wk}주차) 알레르겐 노출 확률 예측", color=TEXT, fontsize=15,
+                 fontweight="bold", pad=14)
+    if not all_items:
         ax.text(0.5, 0.5, "예측할 데이터가 없습니다", ha="center", va="center", color=MUTED)
+        ax.axis("off")
+    elif not items:
+        ax.text(0.5, 0.5, "주요 알레르겐이 매일 고르게 등장합니다", ha="center", va="center",
+                color=TEXT, fontsize=14, fontweight="bold")
         ax.axis("off")
     else:
         names = [n for n, _ in items][::-1]
@@ -142,9 +158,6 @@ def plot_next_week_prediction(prediction: dict, path: str) -> str:
         ax.barh(names, probs, color=colors)
         ax.set_xlim(0, 1)
         ax.set_xlabel("다음 주 노출 확률")
-        wk = prediction.get("next_week_index", "?")
-        ax.set_title(f"다음 주({wk}주차) 알레르겐 노출 확률 예측", color=TEXT, fontsize=15,
-                     fontweight="bold", pad=14)
     fig.tight_layout()
     fig.savefig(path, facecolor=BG, bbox_inches="tight")
     plt.close(fig)

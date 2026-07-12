@@ -1,0 +1,7 @@
+# physical_ai (식품 이미지 스캔) 전용 의존성.
+# 메인 AllerScan GUI는 이 패키지 없이도 동작한다. 식품 스캔 기능을 쓰려면:
+#   pip install -r physical_ai/requirements.txt
+tf-keras>=2.16.0
+opencv-python>=4.8.0
+numpy>=1.23.0
+Pillow>=9.0.0
