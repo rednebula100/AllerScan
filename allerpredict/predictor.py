@@ -6,6 +6,7 @@ TensorFlow는 예측이 실제로 필요할 때(_load) 지연 import한다. 따�
 from __future__ import annotations
 
 import os
+import sys
 
 import numpy as np
 
@@ -13,8 +14,13 @@ from models.menu_item import ALLERGEN_NAMES
 
 from .dataset import NUM_ALLERGENS, exposure_to_vector
 
+if hasattr(sys, "_MEIPASS"):
+    _APP_ROOT = sys._MEIPASS
+else:
+    _APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 DEFAULT_MODEL_PATH = os.path.join(
-    os.path.dirname(__file__), "artifacts", "allerpredict_model.keras"
+    _APP_ROOT, "allerpredict", "artifacts", "allerpredict_model.keras"
 )
 
 

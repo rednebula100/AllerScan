@@ -11,6 +11,7 @@
 from PyInstaller.utils.hooks import collect_data_files
 
 datas = collect_data_files("customtkinter")
+datas += [("allerpredict/artifacts/allerpredict_model.keras", "allerpredict/artifacts")]
 
 # plyer는 sys.platform에 따라 알림 백엔드를 런타임에 동적 import하므로
 # PyInstaller의 정적 분석이 놓친다. Windows 알림 모듈을 명시적으로 포함한다.
