@@ -1,0 +1,30 @@
+# 개인 기록 데이터 (프리셋/식사/증상) — 디렉토리 구조만 유지하고 실제 파일은 제외
+data/*
+!data/presets/
+!data/meals/
+!data/symptoms/
+data/presets/*
+data/meals/*
+data/symptoms/*
+!data/presets/.gitkeep
+!data/meals/.gitkeep
+!data/symptoms/.gitkeep
+
+# 환경 변수 / 시크릿
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# 에디터/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+CLAUDE.md
