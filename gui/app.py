@@ -1,6 +1,7 @@
 """MealApp: customtkinter 기반 급식 알레르기 + 식사/증상 기록 도우미 GUI."""
 from __future__ import annotations
 
+import json
 import os
 import threading
 import tkinter as tk
@@ -57,6 +58,7 @@ DATA_DIR = "data"
 PRESET_DIR = os.path.join(DATA_DIR, "presets")
 MEALS_DIR = os.path.join(DATA_DIR, "meals")
 SYMPTOMS_DIR = os.path.join(DATA_DIR, "symptoms")
+DATASCI_RESULTS_DIR = os.path.join("datasci", "results")
 
 SEVERITY_LABELS = {1: "매우 약함", 2: "약함", 3: "보통", 4: "심함", 5: "매우 심함"}
 
@@ -744,6 +746,33 @@ class MealApp(ctk.CTk):
             text_color=MUTED, font=self.f_body,
         ).pack(anchor="w", padx=12, pady=6)
 
+        # 급식 패턴 분석 (datasci) — analyze.py로 미리 생성한 결과를 읽어 표시
+        self._divider(parent)
+        ctk.CTkLabel(
+            parent, text="📅 급식 패턴 분석", font=self.f_title, text_color=ACCENT,
+        ).pack(anchor="w", padx=8, pady=(4, 4))
+        pattern_btn_row = ctk.CTkFrame(parent, fg_color="transparent")
+        pattern_btn_row.pack(anchor="w", padx=8, pady=(0, 8))
+        ctk.CTkButton(
+            pattern_btn_row, text="📅 분석 데이터 로드", width=140, corner_radius=8, font=self.f_body,
+            fg_color=ACCENT, text_color=BG, hover_color=ACCENT_HOVER,
+            command=self._load_pattern_analysis,
+        ).pack(side="left", padx=(0, 6))
+        self._pattern_detail_btn = ctk.CTkButton(
+            pattern_btn_row, text="🖼 상세 분석 보기", width=140, corner_radius=8, font=self.f_body,
+            fg_color="#0f3460", hover_color="#1b4a80", state="disabled",
+            command=self._show_pattern_detail,
+        )
+        self._pattern_detail_btn.pack(side="left")
+        self._pattern_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        self._pattern_frame.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(
+            self._pattern_frame,
+            text="analyze.py로 생성한 학기 단위 급식 패턴 분석 결과를 불러옵니다 "
+                 "(먼저 터미널에서 'python analyze.py ...' 실행 필요).",
+            text_color=MUTED, font=self.f_body, wraplength=580, justify="left",
+        ).pack(anchor="w", padx=12, pady=6)
+
     def _render_analysis(self) -> None:
         frame = self._analysis_frame
         for w in frame.winfo_children():
@@ -1031,6 +1060,101 @@ class MealApp(ctk.CTk):
             text="※ AllerPredict 1D-CNN 예측값입니다. 참고용이며 의학적 진단이 아닙니다.",
             font=self.f_small, text_color=MUTED, anchor="w", justify="left",
         ).pack(anchor="w", padx=12, pady=(6, 4))
+
+    # ================================================================== #
+    # 급식 패턴 분석 (datasci) — analyze.py 결과 표시
+    # ================================================================== #
+    def _load_pattern_analysis(self) -> None:
+        """analyze.py가 생성한 next_week_prediction.json을 읽어 TOP3를 표시한다."""
+        for w in self._pattern_frame.winfo_children():
+            w.destroy()
+
+        path = os.path.join(DATASCI_RESULTS_DIR, "next_week_prediction.json")
+        if not os.path.exists(path):
+            self._pattern_detail_btn.configure(state="disabled")
+            ctk.CTkLabel(
+                self._pattern_frame,
+                text="분석 결과가 없습니다. 터미널에서 먼저 실행하세요:\n"
+                     "python analyze.py --school 7010083 --office B10 --start 20260301 --end 20260712",
+                text_color=MUTED, font=self.f_body, wraplength=580, justify="left",
+            ).pack(anchor="w", padx=12, pady=6)
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                result = json.load(f)
+        except (OSError, ValueError) as exc:
+            ctk.CTkLabel(self._pattern_frame, text=f"분석 결과를 읽을 수 없습니다: {exc}",
+                         text_color=DANGER, font=self.f_body).pack(anchor="w", padx=12, pady=6)
+            return
+
+        top3 = result.get("top3", [])
+        week_idx = result.get("next_week_index", "?")
+        ctk.CTkLabel(
+            self._pattern_frame, text=f"다음 주({week_idx}주차) 위험 알레르겐 TOP3",
+            font=self.f_body_bold, text_color=CARD_TEXT_LIGHT,
+        ).pack(anchor="w", padx=12, pady=(4, 6))
+
+        if not top3:
+            ctk.CTkLabel(self._pattern_frame, text="예측할 데이터가 부족합니다.",
+                         text_color=MUTED, font=self.f_body).pack(anchor="w", padx=12, pady=(0, 6))
+        for rank, entry in enumerate(top3, 1):
+            prob = entry["probability"]
+            color = DANGER if prob >= 0.6 else (CAUTION if prob >= 0.3 else SAFE)
+            row = ctk.CTkFrame(self._pattern_frame, fg_color="transparent")
+            row.pack(fill="x", padx=12, pady=2)
+            ctk.CTkLabel(row, text=f"{rank}. {entry['allergen']}", width=100, anchor="w",
+                         font=self.f_body_bold, text_color=CARD_TEXT_LIGHT).pack(side="left")
+            bar = ctk.CTkProgressBar(row, progress_color=color, fg_color=BADGE_GRAY, height=14)
+            bar.set(prob)
+            bar.pack(side="left", fill="x", expand=True, padx=8)
+            ctk.CTkLabel(row, text=f"{prob * 100:.0f}%", width=44, font=self.f_body,
+                         text_color=CARD_TEXT_LIGHT).pack(side="left")
+
+        weeks_used = result.get("weeks_used", 0)
+        ctk.CTkLabel(
+            self._pattern_frame, text=f"※ {weeks_used}주치 데이터 기반 선형회귀 추정치입니다.",
+            font=self.f_small, text_color=MUTED,
+        ).pack(anchor="w", padx=12, pady=(6, 4))
+
+        graphs_exist = os.path.exists(os.path.join(DATASCI_RESULTS_DIR, "allergen_frequency.png"))
+        self._pattern_detail_btn.configure(state="normal" if graphs_exist else "disabled")
+
+    def _show_pattern_detail(self) -> None:
+        """급식 패턴 분석 그래프 5종을 matplotlib 창으로 띄운다."""
+        names = [
+            ("allergen_frequency.png", "① 알레르겐 출현 빈도"),
+            ("allergen_heatmap.png", "② 동시 출현 상관관계"),
+            ("weekday_risk.png", "③ 요일별 평균 노출"),
+            ("trend_top5.png", "④ 주차별 상위 5종 추세"),
+            ("next_week_prediction.png", "⑤ 다음 주 예측"),
+        ]
+        images = []
+        for filename, label in names:
+            path = os.path.join(DATASCI_RESULTS_DIR, filename)
+            if os.path.exists(path):
+                images.append((Image.open(path), label))
+
+        if not images:
+            messagebox.showinfo("상세 분석 보기", "그래프 파일이 없습니다. analyze.py를 먼저 실행하세요.")
+            return
+
+        fig = Figure(figsize=(14, 8.5), dpi=100, facecolor=BG)
+        for i, (img, label) in enumerate(images):
+            ax = fig.add_subplot(2, 3, i + 1)
+            ax.imshow(img)
+            ax.set_title(label, color=CARD_TEXT_LIGHT, fontsize=11)
+            ax.axis("off")
+        fig.suptitle("AllerScan · 급식 패턴 분석 상세", color=ACCENT, fontsize=15, fontweight="bold")
+        fig.tight_layout()
+
+        window = ctk.CTkToplevel(self)
+        window.title("AllerScan · 급식 패턴 분석 상세")
+        window.geometry("1180x760")
+        window.configure(fg_color=BG)
+        canvas = FigureCanvasTkAgg(fig, master=window)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True)
 
     # ================================================================== #
     # 식사 기록 탭

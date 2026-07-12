@@ -1,0 +1,6 @@
+# datasci (급식 패턴 분석 모듈) 전용 의존성.
+# 메인 AllerScan GUI는 이 패키지 없이도 동작한다. 분석/수집 기능을 쓰려면:
+#   pip install -r datasci/requirements.txt
+pandas>=2.0.0
+numpy>=1.23.0
+matplotlib>=3.6.0

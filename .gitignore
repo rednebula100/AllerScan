@@ -30,6 +30,10 @@ dist/
 # AllerPredict 학습 산출물 (모델 바이너리 + 그래프 — train.py로 재생성 가능)
 allerpredict/artifacts/
 
+# datasci 분석 산출물 (실제 급식 데이터 CSV/JSON/그래프 — analyze.py로 재생성 가능)
+datasci/results/*
+!datasci/results/.gitkeep
+
 # 에디터/OS
 .vscode/
 .idea/
