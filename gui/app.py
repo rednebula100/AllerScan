@@ -727,6 +727,23 @@ class MealApp(ctk.CTk):
             text_color=MUTED, font=self.f_body,
         ).pack(anchor="w", padx=12, pady=6)
 
+        # 딥러닝 반응 예측 (AllerPredict 1D-CNN) — TF는 버튼 클릭 시 지연 로드
+        self._divider(parent)
+        ctk.CTkLabel(
+            parent, text="🧠 딥러닝 반응 예측 (AllerPredict)", font=self.f_title, text_color=ACCENT,
+        ).pack(anchor="w", padx=8, pady=(4, 4))
+        ctk.CTkButton(
+            parent, text="🧠 예측 실행", width=120, corner_radius=8, font=self.f_body,
+            fg_color=ACCENT, text_color=BG, hover_color=ACCENT_HOVER, command=self._run_prediction,
+        ).pack(anchor="w", padx=8, pady=(0, 8))
+        self._predict_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        self._predict_frame.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(
+            self._predict_frame,
+            text="학습된 1D-CNN 모델로 오늘 노출 기준 알레르기 반응 확률을 예측합니다.",
+            text_color=MUTED, font=self.f_body,
+        ).pack(anchor="w", padx=12, pady=6)
+
     def _render_analysis(self) -> None:
         frame = self._analysis_frame
         for w in frame.winfo_children():
@@ -924,6 +941,96 @@ class MealApp(ctk.CTk):
                 text=f"⚠️ 내 알레르기 '{ALLERGEN_NAMES[n]}'에 오늘 이미 {c}회 노출됐습니다.",
                 text_color=DANGER, font=self.f_body_bold, anchor="w",
             ).pack(anchor="w", padx=14, pady=1)
+
+    # ================================================================== #
+    # 딥러닝 반응 예측 (AllerPredict)
+    # ================================================================== #
+    def _run_prediction(self) -> None:
+        """학습된 1D-CNN으로 오늘 노출 기준 반응 확률을 예측한다.
+
+        TensorFlow와 allerpredict 모듈은 여기서 지연 import한다(앱 시작을 느리게 하지 않음).
+        모델 로딩·추론은 백그라운드 스레드에서, UI 갱신은 after로 메인 스레드에서 처리한다.
+        """
+        for w in self._predict_frame.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(self._predict_frame, text="🧠 모델 로딩·예측 중... (최초 실행은 몇 초 걸립니다)",
+                     text_color=ACCENT, font=self.f_body).pack(anchor="w", padx=12, pady=6)
+
+        def worker() -> None:
+            try:
+                from allerpredict import AllerPredictor
+            except Exception as exc:  # noqa: BLE001 - TF 미설치 등
+                self.after(0, lambda: self._render_prediction_error(
+                    "AllerPredict 모듈을 불러올 수 없습니다. 예측 기능을 쓰려면 "
+                    "'pip install -r allerpredict/requirements.txt'로 TensorFlow를 설치하세요.\n"
+                    f"({exc})"))
+                return
+            predictor = AllerPredictor()
+            if not predictor.available:
+                self.after(0, lambda: self._render_prediction_error(
+                    "학습된 모델이 없습니다. 먼저 터미널에서 'python train.py'를 실행해 "
+                    "모델을 학습하세요."))
+                return
+            try:
+                analyzer = CorrelationAnalyzer()
+                analyzer.load_all(DATA_DIR)
+                exposure = analyzer.get_daily_exposure(datetime.now())
+                prob = predictor.predict_probability(exposure)
+                risks = predictor.per_allergen_risk()
+            except Exception as exc:  # noqa: BLE001
+                msg = str(exc)
+                self.after(0, lambda: self._render_prediction_error(f"예측 실패: {msg}"))
+                return
+            self.after(0, lambda: self._render_prediction(prob, exposure, risks))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _render_prediction_error(self, message: str) -> None:
+        for w in self._predict_frame.winfo_children():
+            w.destroy()
+        ctk.CTkLabel(self._predict_frame, text=message, font=self.f_body, text_color=MUTED,
+                     wraplength=580, justify="left", anchor="w").pack(anchor="w", padx=12, pady=6)
+
+    def _render_prediction(self, prob: float, exposure: dict, risks: list) -> None:
+        for w in self._predict_frame.winfo_children():
+            w.destroy()
+
+        if exposure:
+            exp_txt = ", ".join(f"{ALLERGEN_NAMES[n]}×{c}" for n, c in sorted(exposure.items()))
+        else:
+            exp_txt = "오늘 기록된 식사 없음 (노출 0)"
+        if prob >= 0.6:
+            color, level = DANGER, "높음"
+        elif prob >= 0.3:
+            color, level = CAUTION, "주의"
+        else:
+            color, level = SAFE, "낮음"
+
+        ctk.CTkLabel(self._predict_frame, text=f"오늘 노출: {exp_txt}", font=self.f_body,
+                     text_color=CARD_TEXT_LIGHT, anchor="w", justify="left").pack(
+            anchor="w", padx=12, pady=(4, 2))
+        ctk.CTkLabel(self._predict_frame, text=f"예측 반응 발생 확률 {prob * 100:.0f}%  ·  위험도 {level}",
+                     font=self.f_title, text_color=color, anchor="w").pack(anchor="w", padx=12, pady=(2, 8))
+
+        ctk.CTkLabel(self._predict_frame, text="모델이 지목한 고위험 알레르겐 (단독 노출 시 예측 확률)",
+                     font=self.f_body_bold, text_color=CARD_TEXT_LIGHT).pack(anchor="w", padx=12, pady=(4, 4))
+        maxp = risks[0][2] if risks else 1.0
+        for num, name, p in risks[:5]:
+            row = ctk.CTkFrame(self._predict_frame, fg_color="transparent")
+            row.pack(fill="x", padx=12, pady=2)
+            ctk.CTkLabel(row, text=name, width=84, anchor="w", font=self.f_body,
+                         text_color=CARD_TEXT_LIGHT).pack(side="left")
+            bar = ctk.CTkProgressBar(row, progress_color=DANGER, fg_color=BADGE_GRAY, height=14)
+            bar.set(p / maxp if maxp else 0)
+            bar.pack(side="left", fill="x", expand=True, padx=8)
+            ctk.CTkLabel(row, text=f"{p * 100:.0f}%", width=44, font=self.f_body,
+                         text_color=CARD_TEXT_LIGHT).pack(side="left")
+
+        ctk.CTkLabel(
+            self._predict_frame,
+            text="※ AllerPredict 1D-CNN 예측값입니다. 참고용이며 의학적 진단이 아닙니다.",
+            font=self.f_small, text_color=MUTED, anchor="w", justify="left",
+        ).pack(anchor="w", padx=12, pady=(6, 4))
 
     # ================================================================== #
     # 식사 기록 탭

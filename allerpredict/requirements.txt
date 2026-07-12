@@ -1,0 +1,6 @@
+# AllerPredict (딥러닝 예측 모듈) 전용 의존성.
+# 메인 AllerScan 앱은 이 패키지 없이도 동작한다. 예측 기능을 쓰려면:
+#   pip install -r allerpredict/requirements.txt
+tensorflow>=2.15
+numpy>=1.23.0
+matplotlib>=3.6.0
