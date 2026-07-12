@@ -12,11 +12,19 @@ from PyInstaller.utils.hooks import collect_data_files
 
 datas = collect_data_files("customtkinter")
 datas += [("allerpredict/artifacts/allerpredict_model.keras", "allerpredict/artifacts")]
+# physical_ai(식품 스캔)의 Teachable Machine 모델도 실행에 필수라 명시적으로 포함한다.
+datas += [
+    ("physical_ai/keras_model.h5", "physical_ai"),
+    ("physical_ai/labels.txt", "physical_ai"),
+]
 
 # plyer는 sys.platform에 따라 알림 백엔드를 런타임에 동적 import하므로
 # PyInstaller의 정적 분석이 놓친다. Windows 알림 모듈을 명시적으로 포함한다.
+# tf_keras/cv2도 조건부·동적 서브모듈 로딩이 있어 안전하게 명시한다.
 hiddenimports = [
     "plyer.platforms.win.notification",
+    "tf_keras",
+    "cv2",
 ]
 
 a = Analysis(

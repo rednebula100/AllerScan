@@ -11,12 +11,20 @@ TensorFlow(tf_keras)는 실제로 분류가 필요할 때(_load) 지연 import�
 from __future__ import annotations
 
 import os
+import sys
 
 import numpy as np
 from PIL import Image
 
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keras_model.h5")
-LABELS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "labels.txt")
+# PyInstaller onefile 빌드에서는 __file__이 실제 데이터 파일 위치와 다를 수 있어
+# (AllerPredict와 동일한 이유), 프리즈 여부에 따라 기준 경로를 분기한다.
+if hasattr(sys, "_MEIPASS"):
+    _APP_ROOT = sys._MEIPASS
+else:
+    _APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+MODEL_PATH = os.path.join(_APP_ROOT, "physical_ai", "keras_model.h5")
+LABELS_PATH = os.path.join(_APP_ROOT, "physical_ai", "labels.txt")
 
 IMAGE_SIZE = (224, 224)
 CONFIDENCE_THRESHOLD = 0.6
