@@ -26,7 +26,7 @@ from models import (
 )
 from models.menu_item import ALLERGEN_NAMES
 from models.symptom_record import SYMPTOM_TYPES
-from services import AlarmScheduler, TrayController, send_notification
+from services import AlarmScheduler, TrayController, load_settings, save_settings, send_notification
 
 # matplotlib이 한글(요일/성분명)을 렌더링하도록 Windows 기본 한글 폰트 지정
 matplotlib.rcParams["font.family"] = "Malgun Gothic"
@@ -178,6 +178,9 @@ class MealApp(ctk.CTk):
 
         self.protocol("WM_DELETE_WINDOW", self._quit_app)
 
+        # NEIS 키가 전혀 없으면 창이 뜬 직후 API 키 설정 다이얼로그를 자동으로 띄운다.
+        self.after(300, self._maybe_show_onboarding)
+
     # ================================================================== #
     # 레이아웃 구성
     # ================================================================== #
@@ -216,11 +219,17 @@ class MealApp(ctk.CTk):
         self.school_menu.set("검색 결과가 여기 표시됩니다")
         self.school_menu.pack(side="left", padx=(0, 16))
 
+        self.settings_btn = ctk.CTkButton(
+            bar, text="⚙", width=32, height=32, corner_radius=8, font=self.f_body,
+            fg_color="#0f3460", hover_color="#1b4a80", command=lambda: self._open_api_key_dialog(),
+        )
+        self.settings_btn.pack(side="right", padx=(6, 16))
+
         self.next_btn = ctk.CTkButton(
             bar, text="다음주 ▶", width=82, height=32, corner_radius=8, font=self.f_body,
             fg_color="#0f3460", hover_color="#1b4a80", command=lambda: self._shift_week(1),
         )
-        self.next_btn.pack(side="right", padx=(6, 16))
+        self.next_btn.pack(side="right", padx=6)
         self.week_label = ctk.CTkLabel(bar, text="", font=self.f_body)
         self.week_label.pack(side="right", padx=6)
         self.prev_btn = ctk.CTkButton(
@@ -1213,6 +1222,90 @@ class MealApp(ctk.CTk):
         self.deiconify()
         self.lift()
         self.focus_force()
+
+    def _open_api_key_dialog(self, first_run: bool = False) -> None:
+        """NEIS/식약처 API 키를 입력·저장하는 다이얼로그. 최초 실행 시 자동으로, 이후엔
+        상단바 ⚙ 버튼으로 언제든 열 수 있다. 저장하면 즉시 반영되고 재시작 없이도
+        급식 조회/식품 검색에 바로 쓰인다."""
+        self._show_window()
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("API 키 설정")
+        dialog.geometry("440x380")
+        dialog.configure(fg_color=BG)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        title_text = "AllerScan에 오신 것을 환영합니다" if first_run else "API 키 설정"
+        ctk.CTkLabel(dialog, text=title_text, font=self.f_title, text_color=ACCENT).pack(
+            anchor="w", padx=20, pady=(20, 4)
+        )
+        if first_run:
+            ctk.CTkLabel(
+                dialog,
+                text="급식 조회를 하려면 NEIS API 키가 필요합니다. 지금 건너뛰어도 나중에\n"
+                     "상단바의 ⚙ 버튼으로 언제든 다시 설정할 수 있습니다.",
+                font=self.f_small, text_color=MUTED, justify="left",
+            ).pack(anchor="w", padx=20, pady=(0, 8))
+
+        ctk.CTkLabel(
+            dialog, text="NEIS Open API 키 (급식 조회, 권장)",
+            font=self.f_body_bold, text_color=CARD_TEXT_LIGHT,
+        ).pack(anchor="w", padx=20, pady=(8, 2))
+        neis_entry = ctk.CTkEntry(
+            dialog, width=400, height=32, font=self.f_body, placeholder_text="발급받은 NEIS 키 붙여넣기",
+        )
+        neis_entry.insert(0, self.fetcher.api_key)
+        neis_entry.pack(padx=20)
+        ctk.CTkLabel(
+            dialog, text="발급: open.neis.go.kr", font=self.f_small, text_color=MUTED,
+        ).pack(anchor="w", padx=20, pady=(2, 10))
+
+        ctk.CTkLabel(
+            dialog, text="식약처 Open API 키 (식품 검색, 선택)",
+            font=self.f_body_bold, text_color=CARD_TEXT_LIGHT,
+        ).pack(anchor="w", padx=20, pady=(4, 2))
+        mfds_entry = ctk.CTkEntry(
+            dialog, width=400, height=32, font=self.f_body,
+            placeholder_text="발급받은 식약처 키 붙여넣기 (선택)",
+        )
+        mfds_entry.insert(0, self.mfds.api_key)
+        mfds_entry.pack(padx=20)
+        ctk.CTkLabel(
+            dialog, text="발급: foodsafetykorea.go.kr", font=self.f_small, text_color=MUTED,
+        ).pack(anchor="w", padx=20, pady=(2, 16))
+
+        def on_save() -> None:
+            neis_val = neis_entry.get().strip()
+            mfds_val = mfds_entry.get().strip()
+            settings = load_settings()
+            settings["neis_api_key"] = neis_val
+            settings["mfds_api_key"] = mfds_val
+            try:
+                save_settings(settings)
+            except OSError as exc:
+                messagebox.showerror("API 키 설정", f"저장 실패: {exc}")
+                return
+            self.fetcher.api_key = neis_val
+            self.mfds.api_key = mfds_val
+            dialog.destroy()
+            messagebox.showinfo("API 키 설정", "저장되었습니다.")
+
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.pack(fill="x", padx=20, pady=(0, 20))
+        ctk.CTkButton(
+            btn_row, text="저장", corner_radius=8, font=self.f_body_bold,
+            fg_color=ACCENT, text_color=BG, hover_color=ACCENT_HOVER, command=on_save,
+        ).pack(side="left", expand=True, fill="x", padx=(0, 6))
+        ctk.CTkButton(
+            btn_row, text="나중에" if first_run else "취소", corner_radius=8, font=self.f_body,
+            fg_color="#0f3460", hover_color="#1b4a80", command=dialog.destroy,
+        ).pack(side="left", expand=True, fill="x", padx=(6, 0))
+
+    def _maybe_show_onboarding(self) -> None:
+        """NEIS 키가 전혀 없으면(환경변수도, 저장된 설정도) 최초 실행 다이얼로그를 띄운다."""
+        if not self.fetcher.api_key:
+            self._open_api_key_dialog(first_run=True)
 
     def _open_alarm_settings(self) -> None:
         self._show_window()
