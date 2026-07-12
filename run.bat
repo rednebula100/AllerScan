@@ -6,12 +6,13 @@ echo   AllerScan
 echo ============================================
 echo.
 
-if "%NEIS_API_KEY%"=="" (
-    set /p NEIS_API_KEY=Enter your NEIS Open API key (press Enter to skip):
-)
-if "%MFDS_API_KEY%"=="" (
-    set /p MFDS_API_KEY=Enter your MFDS (food safety) API key (press Enter to skip):
-)
+if defined NEIS_API_KEY goto :skip_neis
+set /p NEIS_API_KEY=Enter your NEIS Open API key (press Enter to skip):
+:skip_neis
+
+if defined MFDS_API_KEY goto :skip_mfds
+set /p MFDS_API_KEY=Enter your MFDS (food safety) API key (press Enter to skip):
+:skip_mfds
 
 echo.
 echo [*] Starting AllerScan...

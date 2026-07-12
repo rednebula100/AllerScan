@@ -176,7 +176,7 @@ class MealApp(ctk.CTk):
         self.scheduler = AlarmScheduler(callback=self._check_today_danger, hour=7, minute=0)
         self.scheduler.start()
 
-        self.protocol("WM_DELETE_WINDOW", self._hide_to_tray)
+        self.protocol("WM_DELETE_WINDOW", self._quit_app)
 
     # ================================================================== #
     # 레이아웃 구성
@@ -1213,10 +1213,6 @@ class MealApp(ctk.CTk):
         self.deiconify()
         self.lift()
         self.focus_force()
-
-    def _hide_to_tray(self) -> None:
-        self.withdraw()
-        self.tray.notify("백그라운드에서 실행 중입니다. 매일 아침 급식을 확인합니다.", "AllerScan")
 
     def _open_alarm_settings(self) -> None:
         self._show_window()

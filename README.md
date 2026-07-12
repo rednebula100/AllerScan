@@ -14,7 +14,8 @@ NEIS(교육정보 개방 포털) API로 급식 데이터를 가져와 내 알레
 - **시차 상관 분석 (Lag Correlation)** — 기록이 쌓이면 "OO 성분 섭취 후 N시간 뒤 증상"의 피어슨
   상관계수를 계산해 의심되는 알레르겐 TOP5를 보여줍니다
 - **오늘의 누적 노출량** — 오늘 먹은 음식들의 알레르기 성분 노출 횟수를 집계해 경고
-- **백그라운드 알림** — 시스템 트레이에 상주하며 매일 아침 오늘 급식에 위험 메뉴가 있으면 토스트 알림
+- **트레이 알림** — 실행 중에는 시스템 트레이에 상주하며 매일 아침 오늘 급식에 위험 메뉴가 있으면
+  토스트 알림 (창을 닫으면(X) 트레이 포함 완전히 종료되므로, 알림을 받으려면 앱을 계속 켜두어야 합니다)
 - **식품 검색 (선택)** — 식품안전나라 API 연동 시 식사 기록에서 식품명으로 검색해 알레르기 정보 자동 입력
 
 ## 스크린샷
@@ -33,7 +34,13 @@ NEIS(교육정보 개방 포털) API로 급식 데이터를 가져와 내 알레
 
 ## Installation & Quick Start
 
-### Windows
+### Windows — 실행 파일로 바로 쓰기 (Python 설치 불필요)
+
+1. [GitHub Releases](https://github.com/rednebula100/AllerScan/releases)에서 최신 `AllerScan.exe`를 다운로드합니다.
+2. 아래 [환경변수 설정](#환경변수-설정)을 참고해 `NEIS_API_KEY`를 설정합니다.
+3. `AllerScan.exe`를 실행합니다.
+
+### Windows — 개발자용 (소스 실행)
 
 ```bat
 install.bat
@@ -41,7 +48,7 @@ run.bat
 ```
 
 `install.bat`이 의존성 설치와 `data/` 디렉토리 생성을 자동으로 처리합니다.
-`run.bat`을 실행하면 API 키 입력을 안내합니다.
+`run.bat`을 실행하면 API 키 입력을 안내합니다. (소스를 수정하거나 직접 빌드하려면 이 방식을 사용하세요.)
 
 ### macOS / Linux
 
@@ -70,7 +77,17 @@ python main.py
 | `NEIS_API_KEY` | 권장 | 없어도 실행은 되지만 급식 조회 범위가 제한됩니다. [발급받기](https://open.neis.go.kr) |
 | `MFDS_API_KEY` | 선택 | 없으면 식사 기록에서 식품 검색이 비활성화되고 수동 입력으로 대체됩니다. [발급받기](https://www.foodsafetykorea.go.kr) |
 
-Windows(PowerShell)에서 직접 설정하려면:
+### Windows에서 설정하는 방법
+
+**방법 A. 시스템 환경변수에 등록 (exe로 실행할 때 권장)**
+
+1. 시작 메뉴 → "환경 변수" 검색 → **"시스템 환경 변수 편집"** 실행
+2. **환경 변수(N)...** 클릭 → 사용자 변수에서 **새로 만들기(N)...**
+3. 변수 이름: `NEIS_API_KEY`, 변수 값: 발급받은 키 → 확인
+4. `MFDS_API_KEY`도 같은 방법으로 추가 (선택)
+5. 설정 후 새로 로그인하거나 탐색기를 재시작해야 반영됩니다.
+
+**방법 B. 실행 전 터미널에서 설정 (소스로 실행할 때)**
 
 ```powershell
 $env:NEIS_API_KEY = "발급받은_키"
@@ -85,7 +102,13 @@ AllerScan/
 ├── main.py                   # 실행 진입점
 ├── requirements.txt
 ├── install.bat / install.sh  # 설치 스크립트
-├── run.bat                   # Windows 실행 스크립트
+├── run.bat                   # Windows 실행 스크립트 (개발자용)
+├── build.bat                 # exe 빌드 스크립트 (PyInstaller)
+├── AllerScan.spec            # PyInstaller 빌드 설정 (onefile, windowed)
+├── assets/
+│   └── icon.ico               # 앱 아이콘 (tools/generate_icon.py로 생성)
+├── tools/
+│   └── generate_icon.py       # 방패 아이콘 → .ico 변환 스크립트
 ├── models/                   # 순수 로직 (타입힌트 전부 적용)
 │   ├── allergy_profile.py    # 내 알레르기 프로필
 │   ├── menu_item.py          # 급식 메뉴 파싱
@@ -105,6 +128,21 @@ AllerScan/
     ├── meals/                  # 식사 기록
     └── symptoms/               # 증상 기록
 ```
+
+## 직접 exe 빌드하기
+
+```bat
+install.bat
+build.bat
+```
+
+`dist\AllerScan.exe`가 생성됩니다. 콘솔 창 없이(windowed) 단일 실행 파일(onefile)로 빌드되며,
+아이콘은 `assets/icon.ico`를 사용합니다 (없으면 `build.bat`이 자동 생성합니다).
+
+## 종료 방법
+
+창을 닫으면(X 버튼) 트레이 아이콘을 포함해 완전히 종료됩니다. 백그라운드 상주 없이 매번
+새로 실행해야 합니다 — 알림 스케줄러도 그때만 동작하니 참고하세요.
 
 ## 기술 스택
 

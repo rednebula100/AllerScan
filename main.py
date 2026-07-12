@@ -5,6 +5,12 @@
     https://open.neis.go.kr
 """
 import os
+import sys
+
+# PyInstaller onefile/windowed(콘솔 없음) 빌드에서는 sys.stdout/stderr가 None이 되어
+# print() 호출이 그대로 크래시로 이어진다. 콘솔이 없을 때는 출력을 버리도록 대체한다.
+if sys.stdout is None or sys.stderr is None:
+    sys.stdout = sys.stderr = open(os.devnull, "w")
 
 # NEIS 서버는 중간 인증서를 함께 보내지 않아 기본 CA 번들로는 SSL 검증이 실패한다.
 # OS(Windows) 인증서 저장소를 사용하도록 truststore를 주입해 이 문제를 해결한다.

@@ -22,6 +22,11 @@ __pycache__/
 .venv/
 venv/
 
+# PyInstaller 빌드 산출물 (exe는 GitHub Releases로 배포, 소스에는 커밋하지 않음)
+build/
+dist/
+*.spec.bak
+
 # 에디터/OS
 .vscode/
 .idea/
